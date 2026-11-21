@@ -1,86 +1,59 @@
 import {
-  ArrowLeft, AudioWaveform, ChevronRight, Clock, Flame, LockKeyhole, Pause, Play, ShieldAlert, SkipForward, Volume2, VolumeX, X,
+  ArrowLeft, AudioWaveform, ChevronRight, LockKeyhole, Pause, Play, ShieldAlert, SkipForward, Volume2, VolumeX, X,
 } from 'lucide-react';
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
+import { computeTodayStats } from './analytics';
 import { instrumentAudio as audio } from './audio';
-import { Stepper, Toggle } from './controls';
+import { Segmented, Stepper, Toggle } from './controls';
 import {
   type AmbientStyle, ambientStyleLabel, bounds, type Check, type Command, isRest, phaseLabel, readout,
   type Session, type SetConfig, type State,
 } from './model';
 
-const ticks = Array.from({ length: 60 }, (_, index) => (
-  <span className={index % 5 === 0 ? 'graduation major' : 'graduation'}
-    key={index} style={{ '--angle': `${index * 6}deg` } as CSSProperties}><i /></span>
-));
+const DIAL_CENTER = 160;
+const PROGRESS_R = 148;
+const PROGRESS_CIRC = 2 * Math.PI * PROGRESS_R;
 
-const TIME_BANDS = [
-  { label: '00–06', title: '深夜 (00:00–05:59)' },
-  { label: '06–12', title: '上午 (06:00–11:59)' },
-  { label: '12–18', title: '下午 (12:00–17:59)' },
-  { label: '18–24', title: '夜间 (18:00–23:59)' },
-] as const;
-
-function computeTodayStats(records: Session[]) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const start = today.getTime() / 1000;
-  let todaySec = 0;
-  let todayCount = 0;
-  let todayCompleted = 0;
-  const dayHasFocus = new Set<string>();
-  const bands = [0, 0, 0, 0];
-  const recentTopics: string[] = [];
-  const seenTopics = new Set<string>();
-
-  for (const r of records) {
-    const t = r.topic?.trim();
-    if (t && !seenTopics.has(t) && recentTopics.length < 4) {
-      seenTopics.add(t);
-      recentTopics.push(t);
-    }
-    const overlap = Math.max(0, r.started + r.seconds - Math.max(start, r.started));
-    if (overlap > 0) {
-      todaySec += overlap;
-      if (r.started >= start) {
-        todayCount += 1;
-        if (r.status === 'complete') todayCompleted += 1;
-        const b = Math.min(3, Math.floor(new Date(r.started * 1000).getHours() / 6));
-        bands[b] += overlap;
-      }
-    }
-    if (r.seconds >= 180) {
-      const d = new Date(r.started * 1000);
-      dayHasFocus.add(d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate());
-    }
-  }
-
-  let streak = 0;
-  for (let offset = 0; offset < 365; offset++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - offset);
-    const key = d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
-    if (dayHasFocus.has(key)) streak += 1;
-    else if (offset === 0) continue;
-    else break;
-  }
-
+const SVG_TICKS = Array.from({ length: 60 }, (_, index) => {
+  const angleRad = ((index * 6) - 90) * (Math.PI / 180);
+  const isCardinal = index % 15 === 0;
+  const isMajor = index % 5 === 0;
+  const outer = 142;
+  const inner = isCardinal ? 128 : isMajor ? 131 : 136;
   return {
-    todayMin: Math.floor(todaySec / 60),
-    todayCount,
-    todayCompleted,
-    streak,
-    bands,
-    recentTopics,
+    index,
+    isCardinal,
+    isMajor,
+    x1: (DIAL_CENTER + outer * Math.cos(angleRad)).toFixed(2),
+    y1: (DIAL_CENTER + outer * Math.sin(angleRad)).toFixed(2),
+    x2: (DIAL_CENTER + inner * Math.cos(angleRad)).toFixed(2),
+    y2: (DIAL_CENTER + inner * Math.sin(angleRad)).toFixed(2),
   };
-}
+});
+
+const CARDINALS = [
+  { label: '60', x: 160, y: 57 },
+  { label: '15', x: 264, y: 163.5 },
+  { label: '30', x: 160, y: 270 },
+  { label: '45', x: 56, y: 163.5 },
+] as const;
 
 function formatEndTime(secondsLeft: number) {
   const eta = new Date(Date.now() + secondsLeft * 1000);
-  return String(eta.getHours()).padStart(2, '0') + ':' + String(eta.getMinutes()).padStart(2, '0');
+  return `${String(eta.getHours()).padStart(2, '0')}:${String(eta.getMinutes()).padStart(2, '0')}`;
 }
 
-function Dial({ state, showTicks, smoothSweep }: { state: State; showTicks: boolean; smoothSweep: boolean }) {
+export function Dial({
+  state,
+  showTicks,
+  smoothSweep,
+  immersion = false,
+}: {
+  state: State;
+  showTicks: boolean;
+  smoothSweep: boolean;
+  immersion?: boolean;
+}) {
   const [minutes, seconds] = readout(state.remaining).split(':');
   const rested = isRest(state.phase);
   const dur = Math.max(1, state.duration);
@@ -88,26 +61,107 @@ function Dial({ state, showTicks, smoothSweep }: { state: State; showTicks: bool
   const progress = state.running ? Math.min(1, Math.max(0, 1 - rem / dur)) : 0;
   const angle = progress * 360;
   const sweepDeg = angle.toFixed(2);
+  const dashOffset = PROGRESS_CIRC * (1 - progress);
+  const etaText = state.paused ? '已暂停' : formatEndTime(state.remaining);
 
-  return <div className={`dial ${state.running ? 'moving' : ''} ${state.paused ? 'paused' : ''} ${rested ? 'resting' : ''}`}
-    style={{ '--sweep': `${sweepDeg}deg` } as CSSProperties}>
-    <div className="dial-ring" aria-hidden="true" />
-    {showTicks && <div className="dial-track" aria-hidden="true">{ticks}</div>}
-    <div className="dial-pointer" aria-hidden="true" style={{ '--angle': `${sweepDeg}deg` } as CSSProperties}><i /></div>
-    <div className="dial-body">
-      <div className={`digits ${minutes.length > 2 ? 'wide' : ''}`}
-        role="timer" aria-label={`${minutes} 分 ${seconds} 秒`}>
-        <span>{minutes}</span><b className={state.running && !state.paused ? 'colon-live' : ''}>:</b><span>{seconds}</span>
+  return (
+    <div
+      className={
+        `dial ${state.running ? 'moving' : ''} ${state.paused ? 'paused' : ''} ${rested ? 'resting' : ''}` +
+        (immersion ? ' is-immersion' : '')
+      }
+    >
+      <svg className="dial-svg" viewBox="0 0 320 320" aria-hidden="true">
+        {/* Recessed architectural chapter rings */}
+        <circle className="dial-chapter-outer" cx={DIAL_CENTER} cy={DIAL_CENTER} r={PROGRESS_R} />
+        <circle className="dial-chapter-inner" cx={DIAL_CENTER} cy={DIAL_CENTER} r="121" />
+
+        {/* Subtle progress track + crisp active progress arc */}
+        <circle
+          className="dial-arc-fill"
+          cx={DIAL_CENTER}
+          cy={DIAL_CENTER}
+          r={PROGRESS_R}
+          strokeDasharray={PROGRESS_CIRC}
+          strokeDashoffset={dashOffset}
+          transform={`rotate(-90 ${DIAL_CENTER} ${DIAL_CENTER})`}
+        />
+
+        {/* 60 Precision Horological Graduations */}
+        {showTicks && (
+          <g className="dial-ticks-group">
+            {SVG_TICKS.map(t => (
+              <line
+                key={t.index}
+                x1={t.x1}
+                y1={t.y1}
+                x2={t.x2}
+                y2={t.y2}
+                className={t.isCardinal ? 'tick-cardinal' : t.isMajor ? 'tick-major' : 'tick-minor'}
+              />
+            ))}
+            {CARDINALS.map(mark => (
+              <text key={mark.label} x={mark.x} y={mark.y} className="dial-cardinal-num" textAnchor="middle">
+                {mark.label}
+              </text>
+            ))}
+          </g>
+        )}
+
+        {/* Sculpted sweeping baton index pointer cleanly confined to outer graduation track */}
+        <g
+          className="dial-hand-group"
+          style={{ transform: `rotate(${sweepDeg}deg)`, transformOrigin: '160px 160px' }}
+        >
+          <rect x="157.8" y="10" width="4.4" height="24" rx="2.2" className="dial-hand-baton" />
+        </g>
+      </svg>
+
+      <div className="dial-body">
+        <div className="dial-kicker">
+          {state.config.mode === 'pomo'
+            ? `第 ${state.round} / ${state.config.rounds} 轮`
+            : `${Math.round(dur / 60)} MIN`}
+        </div>
+        <div
+          className={`digits ${minutes.length > 2 ? 'wide' : ''}`}
+          role="timer"
+          aria-label={`${minutes} 分 ${seconds} 秒`}
+        >
+          <span>{minutes}</span>
+          <b className={state.running && !state.paused ? 'colon-live' : ''}>:</b>
+          <span>{seconds}</span>
+        </div>
+        <div className="dial-caption">
+          <i />
+          <span>{state.paused ? '已暂停' : phaseLabel[state.phase]}</span>
+          <i />
+        </div>
+        <div className="dial-register">
+          {state.config.mode === 'pomo' ? (
+            <span className="round-mark" aria-label={`第 ${state.round} 轮，共 ${state.config.rounds} 轮`}>
+              {Array.from({ length: state.config.rounds }, (_, i) => (
+                <b
+                  key={i}
+                  className={
+                    i < state.round - 1 || (rested && i === state.round - 1)
+                      ? 'done'
+                      : i === state.round - 1
+                        ? 'current'
+                        : ''
+                  }
+                />
+              ))}
+            </span>
+          ) : (
+            <span className="dial-eta-mark">
+              {state.running ? (state.paused ? '等待恢复' : `预计 ${etaText} 结束`) : `预计 ${etaText} 完成`}
+            </span>
+          )}
+        </div>
       </div>
-      <div className="dial-caption"><i />{state.paused ? '已暂停' : phaseLabel[state.phase]}<i /></div>
-      {state.config.mode === 'pomo' && <span className="round-mark" aria-label={`第 ${state.round} 轮`}>
-        {Array.from({ length: state.config.rounds }, (_, i) => (
-          <b key={i} className={i < state.round - 1 || (rested && i === state.round - 1) ? 'done'
-            : i === state.round - 1 ? 'current' : ''} />
-        ))}
-      </span>}
     </div>
-  </div>;
+  );
 }
 
 function LockConfirmDialog({
@@ -217,135 +271,114 @@ export function TimerPanel({ state, records, set, send, ready, localDate, openSe
   const goalPct = Math.min(100, Math.round((stats.todayMin / Math.max(1, config.dailyGoal)) * 100));
   const remainToGoal = Math.max(0, config.dailyGoal - stats.todayMin);
   const etaText = paused ? '暂停中' : formatEndTime(state.remaining);
-  const ringRadius = 26;
-  const ringCirc = 2 * Math.PI * ringRadius;
-  const ringOffset = ringCirc * (1 - goalPct / 100);
   const totalPomoMin = config.rounds * config.work + (config.rounds - 1) * config.short + config.long;
-  const runElapsedPct = running ? Math.min(100, Math.round(((state.duration - state.remaining) / Math.max(1, state.duration)) * 100)) : 0;
-  const maxBand = Math.max(60, ...stats.bands);
-  const currentBandIdx = Math.min(3, Math.floor(new Date().getHours() / 6));
 
   return <div className="console">
-    <section className="instrument panel" aria-label="倒计时">
+    <section className={'instrument panel' + (resting ? ' is-resting' : '')} aria-label="倒计时仪表">
       <div className="instrument-top">
         <div className="modes" role="group" aria-label="计时模式">
           {(['deep', 'pomo'] as const).map(mode => (
-            <button key={mode} type="button" className={config.mode === mode ? 'selected' : ''}
-              aria-pressed={config.mode === mode} disabled={running} onClick={() => {
+            <button
+              key={mode}
+              type="button"
+              className={config.mode === mode ? 'selected' : ''}
+              aria-pressed={config.mode === mode}
+              disabled={running}
+              onClick={() => {
                 if (mode !== config.mode) audio.play('tick');
                 set('mode', mode);
-              }}>{mode === 'deep' ? '深度专注' : '番茄钟'}</button>
+              }}
+            >
+              {mode === 'deep' ? '深度专注' : '番茄钟'}
+            </button>
           ))}
         </div>
-        <span className="phase-pill">
-          {config.mode === 'pomo' ? `第 ${state.round} / ${config.rounds} 轮` : `单程 ${config.deep} 分钟`}
-        </span>
+        <div className="instrument-meta">
+          {config.topic.trim()
+            ? <span className="instrument-topic" title={config.topic}>{config.topic}</span>
+            : <span>{resting ? '休息阶段 · 放松片刻' : (config.lock ? '沉浸锁定已就绪' : '按空格键快速启停')}</span>}
+        </div>
       </div>
 
       <div className="dial-area">
         <Dial state={state} showTicks={config.dialTicks} smoothSweep={config.dialSecondSweep} />
       </div>
 
-      <div className="instrument-actions">
-        {running ? (
-          <>
-            {!resting && !state.locked && (
-              <button type="button" className="button secondary action-pill"
-                onClick={() => {
-                  audio.play(paused ? 'resume' : 'pause');
-                  send(paused ? 'resume' : 'pause');
-                }}>
-                {paused ? <Play fill="currentColor" /> : <Pause />}
-                {paused ? '继续' : '暂停'}
+      <div className="instrument-foot">
+        <div className="instrument-actions">
+          {running ? (
+            <>
+              {!resting && !state.locked && (
+                <button
+                  type="button"
+                  className="button secondary action-pill"
+                  onClick={() => {
+                    audio.play(paused ? 'resume' : 'pause');
+                    send(paused ? 'resume' : 'pause');
+                  }}
+                >
+                  {paused ? <Play fill="currentColor" /> : <Pause />}
+                  {paused ? '继续' : '暂停'}
+                </button>
+              )}
+              <button
+                type="button"
+                className={'button start ' + (resting ? 'rest-action' : 'secondary')}
+                onClick={() => send(resting ? 'skip' : 'end')}
+              >
+                {resting ? <SkipForward /> : <X />}
+                {resting ? '跳过休息' : '结束专注'}
               </button>
-            )}
-            <button type="button" className="button secondary start"
-              onClick={() => send(resting ? 'skip' : 'end')}>
-              {resting ? <SkipForward /> : <X />}{resting ? '跳过休息' : '结束专注'}
+            </>
+          ) : (
+            <button
+              type="button"
+              className={'button start ' + (resting ? 'rest-primary' : 'primary')}
+              disabled={!ready}
+              onClick={handleBeginRequest}
+            >
+              {config.lock && !resting ? <LockKeyhole size={15} /> : <Play fill="currentColor" />}
+              {resting
+                ? `开始${phaseLabel[phase]}`
+                : phase === 'work' && state.round > 1
+                  ? `开始第 ${state.round} 轮`
+                  : config.lock
+                    ? '锁定并开始'
+                    : '开始专注'}
             </button>
-          </>
-        ) : (
-          <button type="button" className="button primary start" disabled={!ready} onClick={handleBeginRequest}>
-            {config.lock && !resting ? <LockKeyhole size={15} /> : <Play fill="currentColor" />}
-            {phase === 'work' && state.round > 1 ? '开始下一轮' : (config.lock && !resting ? '锁定并开始' : '开始专注')}
-          </button>
-        )}
+          )}
+        </div>
       </div>
     </section>
 
-    <aside className="session panel">
+    <aside className="session panel" aria-label="本次设定">
       <div className="session-head">
         <div>
-          <h2>专注控制台</h2>
-          <span className="session-eta"><Clock size={12} />{running ? `预计 ${etaText} 结束` : `若现在开始 · ${etaText} 结束`}</span>
+          <h2>本次设定</h2>
+          <span className="session-eta">
+            {running ? `预计 ${etaText} 结束` : `若现在开始 · 预计 ${etaText} 结束`}
+          </span>
         </div>
-        <button type="button" className="cockpit-link" onClick={openSettings} title="前往完整设置">
+        <button type="button" className="text-action-link" onClick={openSettings}>
           完整设置 <ChevronRight size={13} />
         </button>
       </div>
 
-      {/* 1. Today Focus Dashboard moved to TOP */}
-      <div className="today-dashboard">
-        <div className="today-dash-top">
-          <div className="today-ring-box">
-            <svg className="goal-ring-lg" viewBox="0 0 64 64" aria-hidden="true">
-              <circle className="goal-ring-track" cx="32" cy="32" r={ringRadius} />
-              <circle className="goal-ring-fill" cx="32" cy="32" r={ringRadius}
-                strokeDasharray={ringCirc} strokeDashoffset={ringOffset} />
-              <text x="32" y="36" textAnchor="middle">{goalPct}%</text>
-            </svg>
-          </div>
-          <div className="today-hero">
-            <div className="today-hero-head">
-              <span>今日累计专注</span>
-              <span className="today-streak-badge"><Flame size={11} />连续 {stats.streak} 天</span>
-            </div>
-            <div className="today-hero-num">
-              <strong>{stats.todayMin}</strong>
-              <span>/ {config.dailyGoal} 分钟</span>
-            </div>
-            <div className="today-hero-sub">
-              <span>{remainToGoal > 0 ? `距目标还差 ${remainToGoal} 分` : '今日目标已达成'}</span>
-              <span>完成 {stats.todayCompleted}/{stats.todayCount} 场</span>
-            </div>
-          </div>
-        </div>
-        <div className="today-bands-grid" aria-label="今日四大时间段分布">
-          {TIME_BANDS.map((band, idx) => {
-            const bMin = Math.round(stats.bands[idx] / 60);
-            const hPct = stats.bands[idx] > 0 ? Math.max(18, Math.round((stats.bands[idx] / maxBand) * 100)) : 0;
-            const isNow = idx === currentBandIdx;
-            return (
-              <div key={band.label} className={'band-cell' + (isNow ? ' is-now' : '')} title={`${band.title}：${bMin} 分钟`}>
-                <div className="band-spark">
-                  <i style={{ height: `${hPct}%` }} />
-                </div>
-                <div className="band-meta">
-                  <b>{bMin}m</b>
-                  <span>{band.label}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 2. Topic + Duration + Presets (Identical top structure for both Deep and Pomo) */}
-      <div className="cockpit-card">
-        <label className="setting-line topic-line" htmlFor="study-topic">
+      <div className="deck-section">
+        <label className="setting-line" htmlFor="study-topic">
           <span>主题</span>
           <Topic key={config.topic} value={config.topic} disabled={running} set={set} />
         </label>
 
         {visibleTopicChips.length > 0 && (
-          <div className="topic-chips-row" aria-label="最近主题">
+          <div className="topic-history-row" aria-label="最近主题">
             {visibleTopicChips.map(t => (
-              <div key={t} className={'topic-chip' + (config.topic === t ? ' is-current' : '')}>
+              <span key={t} className={'topic-quick' + (config.topic === t ? ' is-current' : '')}>
                 <button
                   type="button"
-                  className="topic-chip-pick"
+                  className="topic-quick-pick"
                   disabled={running}
-                  title={`切换主题：${t}`}
+                  title={`填入主题：${t}`}
                   onClick={() => {
                     audio.play('tick');
                     set('topic', t);
@@ -355,10 +388,10 @@ export function TimerPanel({ state, records, set, send, ready, localDate, openSe
                 </button>
                 <button
                   type="button"
-                  className="topic-chip-del"
+                  className="topic-quick-del"
                   disabled={running}
-                  aria-label={`移除常用主题 ${t}`}
-                  title="移出快捷标签"
+                  aria-label={`移除快捷主题 ${t}`}
+                  title="移出快捷记录"
                   onClick={() => {
                     audio.play('tick');
                     setHiddenTopics(prev => [...prev, t]);
@@ -367,134 +400,145 @@ export function TimerPanel({ state, records, set, send, ready, localDate, openSe
                 >
                   <X size={10} />
                 </button>
-              </div>
+              </span>
             ))}
           </div>
         )}
 
-        <div className="setting-line time-line">
-          <span>{resting ? '休息时长' : '时长'}</span>
-          <Stepper label={phaseLabel[phase] + '时长'} value={config[phase]} range={bounds[phase]}
-            disabled={running} onChange={value => set(phase, value)} />
+        <div className="setting-line">
+          <span>{resting ? '休息' : '时长'}</span>
+          <Stepper
+            label={phaseLabel[phase] + '时长'}
+            value={config[phase]}
+            range={bounds[phase]}
+            disabled={running}
+            onChange={value => set(phase, value)}
+          />
         </div>
 
-        {!resting && <div className="presets" aria-label="快速设置时长">
-          {(phase === 'deep' ? [25, 50, 90] : [15, 25, 45]).map(value => (
-            <button type="button" key={value} disabled={running} aria-pressed={config[phase] === value}
-              className={config[phase] === value ? 'selected' : ''} onClick={() => {
-                if (config[phase] !== value) audio.play('tick');
-                set(phase, value);
-              }}>{value} 分</button>
-          ))}
-        </div>}
-      </div>
-
-      {/* 3. Cycle Blueprint + Pomo Auto-Flow Toggles */}
-      <div className="blueprint-card">
-        {config.mode === 'pomo' ? (
-          <>
-            <div className="blueprint-head">
-              <span>番茄周期蓝图 · 全组 {totalPomoMin} 分钟</span>
-              <span>{config.rounds} 轮 · {config.short}m/{config.long}m</span>
-            </div>
-            <div className="cycle-pipeline" aria-label="番茄周期进度">
-              {Array.from({ length: config.rounds }, (_, i) => {
-                const done = i < state.round - 1 || (resting && i === state.round - 1);
-                const active = !resting && i === state.round - 1;
-                const restActive = resting && i === state.round - 1;
-                return (
-                  <div className="cycle-node" key={i}>
-                    <span className={'cycle-work' + (done ? ' is-done' : active ? ' is-active' : '')} title={`第 ${i + 1} 轮专注 ${config.work} 分`}>
-                      {config.work}
-                    </span>
-                    <span className={'cycle-rest' + (i === config.rounds - 1 ? ' is-long' : '') + (restActive ? ' is-active' : '')}
-                      title={i === config.rounds - 1 ? `长休 ${config.long} 分` : `短休 ${config.short} 分`}>
-                      {i === config.rounds - 1 ? config.long : config.short}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="pomo-flow-bar" role="group" aria-label="番茄自动流转设置">
+        {!resting && (
+          <div className="presets" aria-label="快速设置时长">
+            {(phase === 'deep' ? [25, 50, 90] : [15, 25, 45]).map(value => (
               <button
                 type="button"
-                className={'flow-pill' + (config.autoStartRest ? ' is-on' : '')}
-                aria-pressed={config.autoStartRest}
+                key={value}
+                disabled={running}
+                aria-pressed={config[phase] === value}
+                className={config[phase] === value ? 'selected' : ''}
                 onClick={() => {
-                  audio.play('tick');
-                  set('autoStartRest', !config.autoStartRest);
+                  if (config[phase] !== value) audio.play('tick');
+                  set(phase, value);
                 }}
               >
-                <i /><span>结束自动休息</span>
+                {value} 分
               </button>
-              <button
-                type="button"
-                className={'flow-pill' + (config.autoStartWork ? ' is-on' : '')}
-                aria-pressed={config.autoStartWork}
-                onClick={() => {
-                  audio.play('tick');
-                  set('autoStartWork', !config.autoStartWork);
-                }}
-              >
-                <i /><span>休完自动下一轮</span>
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="deep-blueprint">
-            <div className="blueprint-head">
-              <span>单程深度专注 · {config.deep} 分钟</span>
-              <span>{running ? `已完成 ${runElapsedPct}%` : (config.lock ? '强锁防切屏' : '空格可暂停恢复')}</span>
-            </div>
-            <div className="deep-ruler" aria-hidden="true">
-              <div className="deep-ruler-fill" style={{ width: `${running ? runElapsedPct : 0}%` }} />
-              <span /><span /><span /><span />
-            </div>
-            <div className="deep-meta-line">
-              <span>记录门槛：≥ 3 分钟自动写入本地档案</span>
-              <span>{config.lock ? '支持 F12 紧急熔断' : '支持随时暂停'}</span>
-            </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* 4. Guard & Acoustic Matrix */}
-      <div className="cockpit-rules">
-        <div className={'rule-tile' + (config.lock ? ' is-armed' : '')}>
-          <div className="rule-tile-top">
-            <div className="rule-label">
-              <LockKeyhole size={14} />
-              <div>
-                <strong>沉浸锁定</strong>
-                <span>{config.lock ? `${config.releaseLength} 位校验 · ${config.cooldownSeconds}s 冷静` : '允许窗口切换与暂停'}</span>
-              </div>
-            </div>
-            <Toggle label="沉浸锁定" checked={config.lock} disabled={running} onChange={value => set('lock', value)} />
+      {/* Pomodoro Cadence ONLY in Pomo Mode — Deep Mode stays serene and uncluttered */}
+      {config.mode === 'pomo' && (
+        <div className="deck-section pomo-cadence">
+          <div className="deck-subhead">
+            <span>番茄节拍</span>
+            <span>全组 {totalPomoMin} 分 · {config.rounds} 轮</span>
+          </div>
+          <div className="cycle-pipeline" aria-label="番茄周期进度">
+            {Array.from({ length: config.rounds }, (_, i) => {
+              const done = i < state.round - 1 || (resting && i === state.round - 1);
+              const active = !resting && i === state.round - 1;
+              const restActive = resting && i === state.round - 1;
+              return (
+                <div className="cycle-node" key={i}>
+                  <span
+                    className={'cycle-work' + (done ? ' is-done' : active ? ' is-active' : '')}
+                    title={`第 ${i + 1} 轮专注 ${config.work} 分`}
+                  >
+                    {config.work}
+                  </span>
+                  <span
+                    className={'cycle-rest' + (i === config.rounds - 1 ? ' is-long' : '') + (restActive ? ' is-active' : '')}
+                    title={i === config.rounds - 1 ? `长休 ${config.long} 分` : `短休 ${config.short} 分`}
+                  >
+                    {i === config.rounds - 1 ? config.long : config.short}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="pomo-flow-row" role="group" aria-label="番茄自动流转设置">
+            <button
+              type="button"
+              className={'flow-toggle' + (config.autoStartRest ? ' is-on' : '')}
+              aria-pressed={config.autoStartRest}
+              onClick={() => {
+                audio.play('tick');
+                set('autoStartRest', !config.autoStartRest);
+              }}
+            >
+              <span>结束自动休息</span>
+              <b>{config.autoStartRest ? '开' : '关'}</b>
+            </button>
+            <button
+              type="button"
+              className={'flow-toggle' + (config.autoStartWork ? ' is-on' : '')}
+              aria-pressed={config.autoStartWork}
+              onClick={() => {
+                audio.play('tick');
+                set('autoStartWork', !config.autoStartWork);
+              }}
+            >
+              <span>休完自动续轮</span>
+              <b>{config.autoStartWork ? '开' : '关'}</b>
+            </button>
           </div>
         </div>
+      )}
 
-        <div className={'rule-tile' + (config.ambient ? ' is-armed' : '')}>
-          <div className="rule-tile-top">
-            <div className="rule-label">
-              <AudioWaveform size={14} />
-              <div>
-                <strong>环境声景</strong>
-                <span>{config.ambient ? ambientStyleLabel[config.ambientStyle].name : '开启后仅在专注计时期间播放'}</span>
-              </div>
+      <div className="deck-section deck-switches">
+        <div className="deck-switch-row">
+          <div className="deck-switch-copy">
+            <strong>
+              <LockKeyhole size={13.5} />
+              沉浸锁定
+            </strong>
+            <span>
+              {config.lock
+                ? `${config.releaseLength} 位校验 · ${config.cooldownSeconds} 秒冷静期`
+                : '全屏置顶并拦截系统切屏热键'}
+            </span>
+          </div>
+          <Toggle label="沉浸锁定" checked={config.lock} disabled={running} onChange={value => set('lock', value)} />
+        </div>
+
+        <div className="deck-switch-row is-ambient">
+          <div className="deck-switch-head">
+            <div className="deck-switch-copy">
+              <strong>
+                <AudioWaveform size={13.5} />
+                环境声景
+              </strong>
+              <span>
+                {config.ambient
+                  ? `专注时淡入 · ${ambientStyleLabel[config.ambientStyle].name}`
+                  : '仅在专注计时期间平滑播放'}
+              </span>
             </div>
             <Toggle label="环境声" checked={config.ambient} onChange={value => set('ambient', value)} />
           </div>
           {config.ambient && (
-            <>
-              <div className="ambient-pills" role="group" aria-label="快速切换声景">
-                {(['brown', 'rain', 'hearth'] as AmbientStyle[]).map(style => (
-                  <button key={style} type="button" className={config.ambientStyle === style ? 'is-selected' : ''}
-                    onClick={() => {
-                      if (config.ambientStyle !== style) audio.play('tick');
-                      set('ambientStyle', style);
-                    }}>{ambientStyleLabel[style].name}</button>
-                ))}
-              </div>
+            <div className="deck-ambient-body">
+              <Segmented<AmbientStyle>
+                label="环境声景选择"
+                value={config.ambientStyle}
+                onChange={value => set('ambientStyle', value)}
+                options={[
+                  { value: 'brown', label: ambientStyleLabel.brown.name },
+                  { value: 'rain', label: ambientStyleLabel.rain.name },
+                  { value: 'hearth', label: ambientStyleLabel.hearth.name },
+                ]}
+              />
               <div className="cockpit-volume">
                 <button
                   type="button"
@@ -505,14 +549,43 @@ export function TimerPanel({ state, records, set, send, ready, localDate, openSe
                 >
                   {config.volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
                 </button>
-                <input aria-label="主音量" type="range" min="0" max="100" value={config.volume}
+                <input
+                  aria-label="主音量"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={config.volume}
                   style={{ '--pct': `${config.volume}%` } as CSSProperties}
                   onChange={event => set('volume', Number(event.currentTarget.value))}
-                  onPointerUp={() => audio.play('tick')} />
+                  onPointerUp={() => audio.play('tick')}
+                />
                 <span>{config.volume}%</span>
               </div>
-            </>
+            </div>
           )}
+        </div>
+      </div>
+
+      <div className="deck-today" aria-label="今日专注刻度">
+        <div className="deck-today-top">
+          <span className="deck-today-label">今日刻度</span>
+          <span className="deck-today-meta">
+            {stats.todayCount} 场 · 连续 {stats.streak} 天
+          </span>
+        </div>
+        <div className="deck-today-row">
+          <div className="deck-today-num">
+            <strong>{stats.todayMin}</strong>
+            <span>/ {config.dailyGoal} 分钟</span>
+          </div>
+          <span className="deck-today-pct">{goalPct}%</span>
+        </div>
+        <div className="deck-today-bar" aria-hidden="true">
+          <i style={{ width: `${goalPct}%` }} />
+        </div>
+        <div className="deck-today-foot">
+          <span>{remainToGoal > 0 ? `距今日目标还差 ${remainToGoal} 分钟` : '今日专注目标已达成'}</span>
+          <span>满 3 分钟计入档案</span>
         </div>
       </div>
     </aside>
@@ -536,19 +609,33 @@ function Topic({ value, disabled, set }: {
 }) {
   const [draft, update] = useState(value);
   return <div className="topic-wrap">
-    <input id="study-topic" className="topic" type="text" maxLength={60} disabled={disabled}
-      placeholder="例如 · 精读第 3 章或核心架构设计" value={draft} onChange={event => update(event.currentTarget.value)}
+    <input
+      id="study-topic"
+      className="topic"
+      type="text"
+      maxLength={60}
+      disabled={disabled}
+      placeholder="例如 · 精读第 3 章或核心架构设计"
+      value={draft}
+      onChange={event => update(event.currentTarget.value)}
       onBlur={() => {
         const trimmed = draft.trim();
         update(trimmed);
         set('topic', trimmed);
-      }} onKeyDown={event => {
+      }}
+      onKeyDown={event => {
         if (event.key === 'Enter') event.currentTarget.blur();
-      }} />
+      }}
+    />
     {draft && !disabled && (
-      <button type="button" className="topic-clear" aria-label="清空输入" title="清空当前输入"
+      <button
+        type="button"
+        className="topic-clear"
+        aria-label="清空输入"
+        title="清空当前输入"
         onMouseDown={event => event.preventDefault()}
-        onClick={() => { update(''); set('topic', ''); }}>
+        onClick={() => { update(''); set('topic', ''); }}
+      >
         <X size={12} />
       </button>
     )}
@@ -564,7 +651,7 @@ export function Immersion({ state, send }: { state: State; send: Command }) {
       {config.mode === 'pomo' && <span className="immersion-round">· 第 {state.round}/{config.rounds} 轮</span>}
     </header>
     <div className="immersion-middle">
-      <Dial state={state} showTicks={config.dialTicks} smoothSweep={config.dialSecondSweep} />
+      <Dial state={state} showTicks={config.dialTicks} smoothSweep={config.dialSecondSweep} immersion />
       {config.topic && <p className="focus-topic">{config.topic}</p>}
     </div>
     <footer className="immersion-foot">
@@ -603,18 +690,26 @@ function Release({ check, send }: { check: Check; send: Command }) {
             >{char}</b>;
           })}</span>)}
       </div>
-      <input ref={entry} className="blind-entry" aria-label="逐字符键入校验码"
-        aria-describedby="code-help" autoComplete="off" spellCheck={false}
+      <input
+        ref={entry}
+        className="blind-entry"
+        aria-label="逐字符键入校验码"
+        aria-describedby="code-help"
+        autoComplete="off"
+        spellCheck={false}
         placeholder="点击此处并连续键入上方字符..."
-        value={'•'.repeat(check.count)} onChange={() => {}}
-        onPaste={event => event.preventDefault()} onDrop={event => event.preventDefault()}
+        value={'•'.repeat(check.count)}
+        onChange={() => {}}
+        onPaste={event => event.preventDefault()}
+        onDrop={event => event.preventDefault()}
         onKeyDown={event => {
           if (event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing || event.repeat) return;
           if (event.key.length === 1 || ['Backspace', 'Delete'].includes(event.key)) {
             event.preventDefault();
             send('releaseKey', event.key);
           }
-        }} />
+        }}
+      />
       <div className="entry-status" role="status">
         <span>{check.error ? '输入有误，已重新生成校验码' : '仅接收单字符键入，禁止粘贴'}</span>
         <span>{check.count} / {totalLen}</span>

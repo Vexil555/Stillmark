@@ -18,6 +18,19 @@ const categories: { id: CategoryId; label: string; desc: string; icon: React.Rea
   { id: 'local-data', label: '本地数据与维护', desc: 'SQLite 存储与导出', icon: <Database size={15} /> },
 ];
 
+const MINI_TICKS = Array.from({ length: 24 }, (_, i) => {
+  const rad = ((i * 15) - 90) * (Math.PI / 180);
+  const major = i % 6 === 0;
+  return {
+    i,
+    major,
+    x1: (32 + 27 * Math.cos(rad)).toFixed(2),
+    y1: (32 + 27 * Math.sin(rad)).toFixed(2),
+    x2: (32 + (major ? 22 : 24.5) * Math.cos(rad)).toFixed(2),
+    y2: (32 + (major ? 22 : 24.5) * Math.sin(rad)).toFixed(2),
+  };
+});
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -29,20 +42,20 @@ function SettingRow({
   description,
   control,
   disabled,
-  badge,
+  note,
 }: {
   title: string;
   description: string;
   control: React.ReactNode;
   disabled?: boolean;
-  badge?: string;
+  note?: string;
 }) {
   return (
     <div className={'preference-row' + (disabled ? ' is-disabled' : '')}>
       <div className="preference-copy">
         <div className="preference-title-line">
           <span className="preference-title">{title}</span>
-          {badge && <em className="preference-badge">{badge}</em>}
+          {note && <span className="preference-note">· {note}</span>}
         </div>
         <p className="preference-desc">{description}</p>
       </div>
@@ -144,14 +157,26 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
     <aside className="settings-nav panel" aria-label="设置分类导航">
       <div className="studio-preview" data-preview-theme={resolvedTheme}>
         <div className="preview-dial-mini">
-          <span className="preview-ticks" data-on={config.dialTicks ? '1' : '0'} />
-          <span className="preview-needle" />
+          <svg viewBox="0 0 64 64" aria-hidden="true">
+            <circle cx="32" cy="32" r="29" className="mini-rim" />
+            {config.dialTicks && MINI_TICKS.map(t => (
+              <line
+                key={t.i}
+                x1={t.x1}
+                y1={t.y1}
+                x2={t.x2}
+                y2={t.y2}
+                className={t.major ? 'mini-tick-major' : 'mini-tick'}
+              />
+            ))}
+            <rect x="30.8" y="3.5" width="2.4" height="7" rx="1.2" className="mini-hand" />
+          </svg>
           <strong>{String(config.mode === 'deep' ? config.deep : config.work).padStart(2, '0')}:00</strong>
         </div>
         <div className="preview-meta">
           <span>实时仪表摘要</span>
           <strong>{resolvedTheme === 'dark' ? '炭黑夜间' : '暖白宣纸'} · {config.dialSecondSweep ? '连续扫秒' : '机械跳秒'}</strong>
-          <small>{config.ambient ? `声景：${ambientStyleLabel[config.ambientStyle].name}` : '声景：已静音'} · 目标 {config.dailyGoal}m</small>
+          <small>{config.ambient ? `声景：${ambientStyleLabel[config.ambientStyle].name}` : '声景：已关闭'} · 目标 {config.dailyGoal}m</small>
         </div>
       </div>
 
@@ -177,7 +202,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
       {running && (
         <div className="settings-banner" role="status">
           <Sliders size={14} />
-          <span>计时进行中：时长、轮次与锁定策略已锁定；外观、音景、每日目标仍可实时微调。</span>
+          <span>计时进行中：时长、轮次与锁定策略已锁定；外观、声景与每日目标仍可实时微调。</span>
         </div>
       )}
 
@@ -191,13 +216,13 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           <div className="section-badge"><Sun size={15} /></div>
           <div>
             <h2 id="appearance">外观与表盘</h2>
-            <p>定制宣纸/炭黑双色材质、精密刻度环、指针走动曲线与物理缓动反馈。</p>
+            <p>定制宣纸 / 炭黑材质、精密刻度环、指针走动曲线与物理缓动反馈。</p>
           </div>
         </div>
         <div className="settings-fields">
           <SettingRow
             title="界面主题"
-            description="浅色采用暖白宣纸与朱红刻线；深色采用炭黑与暖橙高对比，亦可点击页面右上角主题按钮一键切换。"
+            description="浅色采用暖白宣纸与朱红刻线；深色采用炭黑与暖橙高对比，亦可点击页面右上角快速切换。"
             control={
               <Segmented<Theme>
                 label="界面主题"
@@ -212,26 +237,23 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           />
           <SettingRow
             title="表盘 60 道刻线"
-            description="在表盘外环绘制 60 枚分度刻线（每 5 枚加重主刻），关闭后呈现更纯粹的极简进度光环。"
+            description="在表盘外环绘制 60 枚分度刻线与四向方位数字，关闭后呈现极简进度光环。"
             control={
-              <Toggle label="表盘 60 道刻线" checked={config.dialTicks}
-                onChange={value => set('dialTicks', value)} />
+              <Toggle label="表盘 60 道刻线" checked={config.dialTicks} onChange={value => set('dialTicks', value)} />
             }
           />
           <SettingRow
             title="指针连续扫动"
             description="开启后按 125ms 精度丝滑推移；关闭则每秒咔嗒步进一格，还原传统机械秒表走针感。"
             control={
-              <Toggle label="指针连续扫动" checked={config.dialSecondSweep}
-                onChange={value => set('dialSecondSweep', value)} />
+              <Toggle label="指针连续扫动" checked={config.dialSecondSweep} onChange={value => set('dialSecondSweep', value)} />
             }
           />
           <SettingRow
             title="界面动效"
-            description="控制开关拨动、页面切入与微回弹手感；若系统已开启“减少动态效果”会自动顺从屏蔽。"
+            description="控制开关拨动、视图切换与微回弹手感；若系统已开启“减少动态效果”会自动顺从屏蔽。"
             control={
-              <Toggle label="界面动效" checked={config.motion}
-                onChange={value => set('motion', value)} />
+              <Toggle label="界面动效" checked={config.motion} onChange={value => set('motion', value)} />
             }
           />
         </div>
@@ -253,10 +275,9 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
         <div className="settings-fields">
           <SettingRow
             title="机械反馈与阶段提示"
-            description="操作拨片开关、调节参数时触发机械卡榫音效，专注开始/暂停/休息切换时播报和弦提示。"
+            description="操作拨片开关、调节参数时触发机械卡榫音效，专注开始 / 暂停 / 休息切换时播报和弦提示。"
             control={
-              <Toggle label="机械反馈与阶段提示" checked={config.sound}
-                onChange={value => set('sound', value)} />
+              <Toggle label="机械反馈与阶段提示" checked={config.sound} onChange={value => set('sound', value)} />
             }
           />
           <SettingRow
@@ -291,8 +312,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
             title="专注环境声"
             description="仅在专注计时运行期间平滑淡入底噪，暂停、进入休息或结束时自动淡出静音。"
             control={
-              <Toggle label="专注环境声" checked={config.ambient}
-                onChange={value => set('ambient', value)} />
+              <Toggle label="专注环境声" checked={config.ambient} onChange={value => set('ambient', value)} />
             }
           />
           <SettingRow
@@ -310,8 +330,11 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
                     { value: 'hearth', label: ambientStyleLabel.hearth.name },
                   ]}
                 />
-                <button type="button" className="button secondary mini-btn"
-                  onClick={() => audio.previewAmbient(config.ambientStyle)}>
+                <button
+                  type="button"
+                  className="button secondary mini-btn"
+                  onClick={() => audio.previewAmbient(config.ambientStyle)}
+                >
                   <Play size={11} />试听 3 秒
                 </button>
               </div>
@@ -330,14 +353,14 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           <div className="section-badge"><Clock3 size={15} /></div>
           <div>
             <h2 id="rhythm">计时节奏与目标</h2>
-            <p>精细调节单程深度时长、番茄四段节拍、自动化流转与每日专注目标基线。</p>
+            <p>调节深度专注时长、番茄四段节拍、自动化流转与每日专注目标基线。</p>
           </div>
         </div>
         <div className="settings-fields">
           <SettingRow
             title="深度专注默认时长"
-            badge={running ? '计时中锁定' : undefined}
-            description="单程深度专注的默认计时长度（1–180 分钟），计时台亦支持 25 / 50 / 90 分钟一键切换。"
+            note={running ? '计时中锁定' : undefined}
+            description="深度专注的默认计时长度（1–180 分钟），计时台亦支持 25 / 50 / 90 分钟一键切换。"
             disabled={running}
             control={
               <Stepper label="深度专注时长" value={config.deep} range={bounds.deep} disabled={running}
@@ -346,7 +369,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           />
           <SettingRow
             title="番茄专注时长"
-            badge={running ? '计时中锁定' : undefined}
+            note={running ? '计时中锁定' : undefined}
             description="每轮番茄工作阶段时长（1–120 分钟），完成后自动计入专注流水档案。"
             disabled={running}
             control={
@@ -356,7 +379,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           />
           <SettingRow
             title="短休时长"
-            badge={running ? '计时中锁定' : undefined}
+            note={running ? '计时中锁定' : undefined}
             description="每轮番茄工作结束后触发的短休恢复时间（1–45 分钟），休息期不强制锁屏。"
             disabled={running}
             control={
@@ -366,7 +389,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           />
           <SettingRow
             title="长休时长"
-            badge={running ? '计时中锁定' : undefined}
+            note={running ? '计时中锁定' : undefined}
             description="跑完一整组番茄轮次后进入的大段休息时间（1–90 分钟）。"
             disabled={running}
             control={
@@ -376,8 +399,8 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           />
           <SettingRow
             title="每组番茄轮数"
-            badge={running ? '计时中锁定' : undefined}
-            description="每连续完成多少轮番茄专注后切换为长休息（2–8 轮），控制台蓝图同步展示全部节点。"
+            note={running ? '计时中锁定' : undefined}
+            description="每连续完成多少轮番茄专注后切换为长休息（2–8 轮），计时台番茄节拍同步展示全部节点。"
             disabled={running}
             control={
               <Stepper label="每组轮数" value={config.rounds} range={bounds.rounds} disabled={running}
@@ -386,7 +409,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           />
           <SettingRow
             title="专注结束自动开始休息"
-            description="开启后番茄工作归零即刻流转至短休/长休；关闭则停留在待命状态等你手动点击。"
+            description="开启后番茄工作归零即刻流转至短休 / 长休；关闭则停留在待命状态等你手动点击。"
             control={
               <Toggle label="专注结束自动开始休息" checked={config.autoStartRest}
                 onChange={value => set('autoStartRest', value)} />
@@ -402,7 +425,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           />
           <SettingRow
             title="每日专注目标"
-            description="同时驱动计时台环形达成仪表盘与专注记录热力图的色阶基准（15–720 分钟，步进 15 分）。"
+            description="同时驱动计时台今日刻度与专注记录热力图的色阶基准（15–720 分钟，步进 15 分）。"
             control={
               <Stepper label="每日专注目标" value={config.dailyGoal} range={bounds.dailyGoal} step={15}
                 onChange={value => set('dailyGoal', value)} />
@@ -427,7 +450,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
         <div className="settings-fields recovery">
           <SettingRow
             title="提前退出校验码长度"
-            badge={running ? '计时中锁定' : undefined}
+            note={running ? '计时中锁定' : undefined}
             description="锁定时申请提前结束须逐字符键入随机防粘贴校验码长度（16–64 位），输入错一字立即重抽。"
             disabled={running}
             control={
@@ -437,7 +460,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           />
           <SettingRow
             title="校验通过后冷静等待"
-            badge={running ? '计时中锁定' : undefined}
+            note={running ? '计时中锁定' : undefined}
             description="校验码全对后需静待的缓冲秒数（0–300 秒，步进 30 秒），设为 0 秒则验证完毕立即解锁。"
             disabled={running}
             control={
