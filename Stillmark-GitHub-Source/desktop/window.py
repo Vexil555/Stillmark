@@ -184,7 +184,7 @@ class Bridge(QObject):
     def update_window_title(self, state):
         if state["running"]:
             minutes, seconds = divmod(state["remaining"], 60)
-            tag = "暂停" if state["paused"] else PHASES[state["phase"]]
+            tag = "暂停" if state["paused"] else ("正计时" if state.get("countingUp") else PHASES[state["phase"]])
             self.window.setWindowTitle(f"{minutes:02d}:{seconds:02d} · {tag} — 刻度 STILLMARK")
         else:
             self.window.setWindowTitle("刻度 STILLMARK")
@@ -225,6 +225,7 @@ class Bridge(QObject):
 
     def end(self, status, notice):
         self.window.exit_lock()
+        recorded = False
         try:
             was_focus = self.timer.session is not None
             recorded = self.timer.stop(status)
@@ -236,6 +237,7 @@ class Bridge(QObject):
         except sqlite3.Error as error:
             self.timer.notice = f"写入专注记录失败。{error}"
         self.publish()
+        return recorded
 
     def begin(self):
         timer = self.timer
@@ -286,7 +288,11 @@ class Bridge(QObject):
                 elif timer.release["until"] is not None and time.monotonic() >= timer.release["until"]:
                     self.end("released", "本次专注已提前结束")
             else:
-                self.end("stopped", "本次专注已结束")
+                if timer.counting_up:
+                    if self.end("complete", "本次正计时专注已完成"):
+                        self.chime.emit("finish")
+                else:
+                    self.end("stopped", "本次专注已结束")
         elif command == "cancelRelease" and timer.release is not None:
             timer.release = None
         elif command == "releaseKey" and timer.release is not None:

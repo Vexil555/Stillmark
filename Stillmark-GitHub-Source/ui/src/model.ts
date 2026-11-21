@@ -1,11 +1,13 @@
 export type Phase = 'deep' | 'work' | 'short' | 'long';
 export type Mode = 'deep' | 'pomo';
+export type DeepStyle = 'countdown' | 'countup';
 export type Theme = 'light' | 'dark';
 export type AmbientStyle = 'brown' | 'rain' | 'hearth';
 
 export interface Config {
   theme: Theme;
   mode: Mode;
+  deepStyle: DeepStyle;
   topic: string;
   deep: number;
   work: number;
@@ -63,6 +65,7 @@ export interface State {
   running: boolean;
   paused: boolean;
   locked: boolean;
+  countingUp?: boolean;
   release: Check | null;
   notice: string;
   systemDark: boolean;
@@ -113,6 +116,7 @@ export function resolveTheme(theme: Theme): 'light' | 'dark' {
 export const defaultConfig: Config = {
   theme: 'light',
   mode: 'deep',
+  deepStyle: 'countdown',
   topic: '',
   deep: 50,
   work: 25,
@@ -145,6 +149,7 @@ export const initialState: State = {
   running: false,
   paused: false,
   locked: false,
+  countingUp: false,
   release: null,
   notice: '',
   systemDark: false,

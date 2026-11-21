@@ -171,7 +171,12 @@ export function createPreviewBridge(): StillmarkBridgeObject {
             publishHistory();
           }
         } else {
-          engine.endManual('stopped', '本次专注已结束', now);
+          if (engine.countingUp) {
+            const recorded = engine.endManual('complete', '本次正计时专注已完成', now);
+            if (recorded) chime.emit('finish');
+          } else {
+            engine.endManual('stopped', '本次专注已结束', now);
+          }
           publishHistory();
         }
       } else if (command === 'cancelRelease' && engine.hasRelease()) {

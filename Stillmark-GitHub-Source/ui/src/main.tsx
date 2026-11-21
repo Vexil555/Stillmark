@@ -96,41 +96,22 @@ function useLocalDate() {
   return date;
 }
 
-function ThemeSwitch({ theme, change }: { theme: Theme; change: (theme: Theme) => void }) {
-  const resolved = resolveTheme(theme);
+function ThemeToggleButton({ theme, change }: { theme: Theme; change: (theme: Theme) => void }) {
+  const isDark = resolveTheme(theme) === 'dark';
   return (
-    <div className="theme-switch" role="group" aria-label="界面主题">
-      <button
-        type="button"
-        className={resolved === 'light' ? 'is-active' : ''}
-        aria-label="浅色主题"
-        aria-pressed={resolved === 'light'}
-        title="暖白宣纸主题"
-        onClick={() => {
-          if (resolved !== 'light') {
-            audio.play('tick');
-            change('light');
-          }
-        }}
-      >
-        <Sun />
-      </button>
-      <button
-        type="button"
-        className={resolved === 'dark' ? 'is-active' : ''}
-        aria-label="深色主题"
-        aria-pressed={resolved === 'dark'}
-        title="炭黑夜间主题"
-        onClick={() => {
-          if (resolved !== 'dark') {
-            audio.play('tick');
-            change('dark');
-          }
-        }}
-      >
-        <Moon />
-      </button>
-    </div>
+    <button
+      type="button"
+      className="theme-toggle-btn"
+      aria-label={isDark ? '切换为浅色主题' : '切换为深色主题'}
+      title={isDark ? '当前：深色，点击切至浅色' : '当前：浅色，点击切至深色'}
+      onClick={() => {
+        audio.play('tick');
+        change(isDark ? 'light' : 'dark');
+      }}
+    >
+      {isDark ? <Moon /> : <Sun />}
+      <span>{isDark ? '深色' : '浅色'}</span>
+    </button>
   );
 }
 
@@ -158,6 +139,7 @@ function App() {
   const { config } = state;
   const date = useLocalDate();
   const resting = isRest(state.phase);
+  const countingUp = Boolean(state.countingUp || (config.mode === 'deep' && config.deepStyle === 'countup'));
 
   useEffect(() => {
     const effective = state.locked ? 'night' : resolveTheme(config.theme);
@@ -174,7 +156,7 @@ function App() {
   if (state.locked) return <Immersion state={state} send={send} />;
   const statusText = state.notice || (
     state.running
-      ? (state.paused ? '专注已暂停' : focusing ? '专注进行中' : '休息中')
+      ? (state.paused ? '专注已暂停' : focusing ? (countingUp ? '正向专注进行中' : '专注进行中') : '休息中')
       : (ready ? (previewMode ? '准备就绪 · 浏览器预览桥' : '准备就绪') : '正在连接本地计时器')
   );
 
@@ -194,7 +176,9 @@ function App() {
               onClick={() => go('timer')}
               title="返回计时台"
             >
-              <span className="rail-live-label">{state.paused ? '已暂停' : phaseLabel[state.phase]}</span>
+              <span className="rail-live-label">
+                {state.paused ? '已暂停' : countingUp ? '正计时' : phaseLabel[state.phase]}
+              </span>
               <strong className="rail-live-time">{readout(state.remaining)}</strong>
             </button>
           )}
@@ -209,11 +193,21 @@ function App() {
           <h1>{tabs.find(tab => tab.id === view)?.title}</h1>
           <div className="page-tools">
             <span className="date-stamp">{date}</span>
-            <ThemeSwitch theme={config.theme} change={theme => set('theme', theme)} />
+            <ThemeToggleButton theme={config.theme} change={theme => set('theme', theme)} />
           </div>
         </header>
-        {view === 'timer' && <TimerPanel state={state} records={records} set={set} send={send} ready={ready}
-          localDate={date} openSettings={() => go('settings')} />}
+        {view === 'timer' && (
+          <TimerPanel
+            state={state}
+            records={records}
+            set={set}
+            send={send}
+            ready={ready}
+            localDate={date}
+            openSettings={() => go('settings')}
+            openHistory={() => go('history')}
+          />
+        )}
         {view === 'history' && <History records={records} dailyGoal={config.dailyGoal} send={send} localDate={date} />}
         {view === 'settings' && <Settings state={state} set={set} send={send} />}
       </main>
@@ -224,7 +218,9 @@ function App() {
         {statusText}
       </span>
       <span className="status-mode">
-        {phaseLabel[state.phase]} · {Math.round(state.duration / 60)} 分钟
+        {countingUp
+          ? '深度专注 · 正计时'
+          : `${phaseLabel[state.phase]} · ${Math.round(state.duration / 60)} 分钟`}
         {config.mode === 'pomo' ? ` · 第 ${state.round}/${config.rounds} 轮` : ''}
       </span>
     </footer>

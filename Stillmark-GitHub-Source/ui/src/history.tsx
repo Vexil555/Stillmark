@@ -1,5 +1,6 @@
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Download, RotateCcw, Search, X,
+  Award, CalendarDays, ChevronLeft, ChevronRight, Clock3, Download, Flame, Layers,
+  RotateCcw, Search, Tag, Target, TrendingUp, Trophy, X,
 } from 'lucide-react';
 import { type CSSProperties, useMemo, useState } from 'react';
 import {
@@ -122,25 +123,37 @@ export function History({
   return <div className="history-layout">
     <section className="kpi-grid" aria-label="核心专注指标">
       <article className="panel kpi-card">
-        <div className="kpi-head">累计专注</div>
+        <div className="kpi-head">
+          <span>累计专注</span>
+          <Clock3 className="kpi-corner-icon" size={16} aria-hidden="true" />
+        </div>
         <div className="kpi-value"><strong>{formatCount.format(totalMinutes)}</strong><span>分钟</span></div>
         <div className="kpi-foot">约 {totalHours} 小时 · 活跃 {summary.activeDays} 天</div>
       </article>
 
       <article className="panel kpi-card">
-        <div className="kpi-head">专注场次</div>
+        <div className="kpi-head">
+          <span>专注场次</span>
+          <Layers className="kpi-corner-icon" size={16} aria-hidden="true" />
+        </div>
         <div className="kpi-value"><strong>{formatCount.format(summary.recent.length)}</strong><span>场</span></div>
         <div className="kpi-foot">场均 {avgMinutes} 分钟 · 锁定 {summary.lockedCount} 场</div>
       </article>
 
       <article className="panel kpi-card">
-        <div className="kpi-head">完整达成率</div>
+        <div className="kpi-head">
+          <span>完整达成率</span>
+          <Award className="kpi-corner-icon" size={16} aria-hidden="true" />
+        </div>
         <div className="kpi-value"><strong>{completionRate}</strong><span>%</span></div>
         <div className="kpi-foot">完整 {summary.completed} 场 · 达标 {summary.goalDays} 天</div>
       </article>
 
       <article className="panel kpi-card is-highlight">
-        <div className="kpi-head">连续专注</div>
+        <div className="kpi-head">
+          <span>连续专注</span>
+          <Flame className="kpi-corner-icon is-flame" size={16} aria-hidden="true" />
+        </div>
         <div className="kpi-value"><strong>{summary.streak}</strong><span>天</span></div>
         <div className="kpi-foot">历史最高 {summary.bestStreak} 天 · 本周 {Math.round(summary.thisWeekSec / 60)} 分</div>
       </article>
@@ -150,7 +163,7 @@ export function History({
       <section className="panel heatmap-card" aria-label="专注节律脉络">
         <div className="card-header">
           <div className="card-title-group">
-            <h2>专注节律脉络</h2>
+            <h2><CalendarDays size={15} />专注节律脉络</h2>
             <p>
               {span === 'month'
                 ? `单月明细日历 · 色阶按每日目标 ${dailyGoal} 分钟分级，点选日期可筛选下方档案`
@@ -256,7 +269,7 @@ export function History({
                   key="matrix"
                   style={{ '--weeks': MATRIX_WEEK_COUNT } as CSSProperties}
                   role="grid"
-                  aria-label="近 20 周专注热力矩阵"
+                  aria-label="近 24 周专注热力矩阵"
                 >
                   <div className="heatmap-months" aria-hidden="true">
                     <span />
@@ -335,17 +348,19 @@ export function History({
 
           <aside className="heatmap-insights" aria-label="周期洞察">
             <div className="insight-row">
-              <span>峰值专注日</span>
+              <span><Trophy size={12.5} />峰值专注日</span>
               <strong>{summary.bestDaySeconds > 0 ? formatSpan(summary.bestDaySeconds) : '暂无'}</strong>
               <small>{summary.bestDayKey || '完成专注后自动统计'}</small>
             </div>
             <div className="insight-row">
-              <span>本周较上周</span>
-              <strong>{summary.weekDeltaPct > 0 ? `+${summary.weekDeltaPct}%` : `${summary.weekDeltaPct}%`}</strong>
+              <span><TrendingUp size={12.5} />本周较上周</span>
+              <strong className={summary.weekDeltaPct > 0 ? 'is-up' : ''}>
+                {summary.weekDeltaPct > 0 ? `+${summary.weekDeltaPct}%` : `${summary.weekDeltaPct}%`}
+              </strong>
               <small>本周已专注 {Math.round(summary.thisWeekSec / 60)} 分钟</small>
             </div>
             <div className="insight-row">
-              <span>目标达成率</span>
+              <span><Target size={12.5} />目标达成率</span>
               <strong>{summary.activeDays > 0 ? Math.round((summary.goalDays / summary.activeDays) * 100) : 0}%</strong>
               <small>活跃日中 {summary.goalDays} / {summary.activeDays} 天达标</small>
             </div>
@@ -357,7 +372,7 @@ export function History({
         <section className="panel hours-card" aria-label="24 小时节律">
           <div className="card-header">
             <div className="card-title-group">
-              <h2>24 小时专注节律</h2>
+              <h2><Clock3 size={15} />24 小时专注节律</h2>
               <p>
                 {hoveredHour !== null
                   ? `${String(hoveredHour).padStart(2, '0')}:00 时段累计 ${Math.round(summary.hours[hoveredHour] / 60)} 分钟`
@@ -402,7 +417,7 @@ export function History({
         <section className="panel topics-card" aria-label="主题时长排行">
           <div className="card-header">
             <div className="card-title-group">
-              <h2>专注主题分布</h2>
+              <h2><Tag size={15} />专注主题分布</h2>
               <p>当前统计窗口内耗时最多的课题</p>
             </div>
           </div>
@@ -429,7 +444,7 @@ export function History({
       <div className="recent-head">
         <div className="card-title-group">
           <div className="archive-title-row">
-            <h2>专注流水档案</h2>
+            <h2><Layers size={15} />专注流水档案</h2>
             {pickedCell && (
               <button
                 type="button"
@@ -491,15 +506,19 @@ export function History({
                   <time dateTime={new Date(record.started * 1000).toISOString()}>
                     {timestamp.format(record.started * 1000)}
                   </time>
-                  <div className="ledger-main">
-                    <span className="record-topic">{record.topic || (record.mode === 'deep' ? '深度专注' : '番茄专注')}</span>
-                    <span className="record-meta">
-                      {record.mode === 'deep' ? '深度' : '番茄'}
-                      {record.locked ? ' · 锁定' : ''}
-                    </span>
-                  </div>
+                  <span className={'record-mode-panel mode-' + record.mode}>
+                    {record.mode === 'deep' ? '专注' : '番茄'}
+                  </span>
+                  <span className="record-lock-slot">
+                    {record.locked ? <span className="record-lock-panel">锁定</span> : null}
+                  </span>
+                  <span className="record-topic" title={record.topic || (record.mode === 'deep' ? '深度专注' : '番茄专注')}>
+                    {record.topic || (record.mode === 'deep' ? '深度专注' : '番茄专注')}
+                  </span>
                   <div className="timeline-progress" title={`完成度 ${ratio}%`}>
-                    <div className="timeline-bar"><i style={{ width: `${ratio}%` }} /></div>
+                    <div className="timeline-bar">
+                      <i className={'bar-' + record.status} style={{ width: `${ratio}%` }} />
+                    </div>
                     <span>{ratio}%</span>
                   </div>
                   <span className={'record-status status-' + record.status}>{statuses[record.status]}</span>

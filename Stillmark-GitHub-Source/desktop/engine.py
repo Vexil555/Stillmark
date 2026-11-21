@@ -9,6 +9,7 @@ from pathlib import Path
 DEFAULTS = {
     "theme": "light",
     "mode": "deep",
+    "deepStyle": "countdown",
     "topic": "",
     "deep": 50,
     "work": 25,
@@ -47,6 +48,7 @@ RANGES = {
 ENUMS = {
     "theme": ("light", "dark"),
     "mode": ("deep", "pomo"),
+    "deepStyle": ("countdown", "countup"),
     "ambientStyle": ("brown", "rain", "hearth"),
 }
 
@@ -117,12 +119,18 @@ class Journal:
             )
         return cursor.lastrowid
 
-    def update(self, session, seconds, status):
+    def update(self, session, seconds, status, planned=None):
         with self.db:
-            self.db.execute(
-                "UPDATE sessions SET seconds = ?, status = ? WHERE id = ?",
-                (seconds, status, session),
-            )
+            if planned is None:
+                self.db.execute(
+                    "UPDATE sessions SET seconds = ?, status = ? WHERE id = ?",
+                    (seconds, status, session),
+                )
+            else:
+                self.db.execute(
+                    "UPDATE sessions SET seconds = ?, planned = ?, status = ? WHERE id = ?",
+                    (seconds, planned, status, session),
+                )
 
     def discard(self, session):
         with self.db:
@@ -152,6 +160,8 @@ class Timer:
         self.round = 1
         self.deadline = None
         self.paused_remaining = None
+        self.started_mono = None
+        self.paused_elapsed = None
         self.duration = 0
         self.locked = False
         self.session = None
@@ -165,12 +175,21 @@ class Timer:
         return "deep" if self.config["mode"] == "deep" else "work"
 
     @property
+    def counting_up(self):
+        return self.phase == "deep" and self.config["deepStyle"] == "countup"
+
+    @property
     def running(self):
-        return self.deadline is not None or self.paused_remaining is not None
+        return (
+            self.deadline is not None
+            or self.paused_remaining is not None
+            or self.started_mono is not None
+            or self.paused_elapsed is not None
+        )
 
     @property
     def paused(self):
-        return self.paused_remaining is not None
+        return self.paused_remaining is not None or self.paused_elapsed is not None
 
     @property
     def resting(self):
@@ -214,10 +233,21 @@ class Timer:
 
     def begin(self, locked=False, now=None):
         now = time.monotonic() if now is None else now
-        self.duration = self.config[PHASE_DURATION[self.phase]] * 60
         self.checkpoint = 0
         self.notice = ""
         self.paused_remaining = None
+        self.paused_elapsed = None
+        if self.counting_up:
+            self.duration = 0
+            self.deadline = None
+            self.started_mono = now
+            self.session = self.journal.begin(
+                0, self.config["mode"], self.config["topic"], locked,
+            )
+            self.locked = locked
+            return
+        self.started_mono = None
+        self.duration = self.config[PHASE_DURATION[self.phase]] * 60
         if not self.resting:
             self.session = self.journal.begin(
                 self.duration, self.config["mode"], self.config["topic"], locked,
@@ -229,8 +259,12 @@ class Timer:
         if not self.running or self.paused or self.locked or self.resting:
             return False
         now = time.monotonic() if now is None else now
-        self.paused_remaining = self.remaining(now)
-        self.deadline = None
+        if self.counting_up:
+            self.paused_elapsed = self.elapsed(now)
+            self.started_mono = None
+        else:
+            self.paused_remaining = self.remaining(now)
+            self.deadline = None
         self.notice = "已暂停计时"
         return True
 
@@ -238,12 +272,25 @@ class Timer:
         if not self.paused:
             return False
         now = time.monotonic() if now is None else now
-        self.deadline = now + self.paused_remaining
-        self.paused_remaining = None
+        if self.paused_elapsed is not None:
+            self.started_mono = now - self.paused_elapsed
+            self.paused_elapsed = None
+        else:
+            self.deadline = now + self.paused_remaining
+            self.paused_remaining = None
         self.notice = ""
         return True
 
+    def elapsed(self, now):
+        if self.paused_elapsed is not None:
+            return self.paused_elapsed
+        if self.started_mono is not None:
+            return max(0.0, now - self.started_mono)
+        return 0.0
+
     def remaining(self, now):
+        if self.counting_up:
+            return self.elapsed(now)
         if self.paused_remaining is not None:
             return self.paused_remaining
         if self.deadline is None:
@@ -251,6 +298,8 @@ class Timer:
         return max(0.0, self.deadline - now)
 
     def remaining_seconds(self, now):
+        if self.counting_up:
+            return max(0, math.floor(self.elapsed(now)))
         return max(0, math.ceil(self.remaining(now)))
 
     def stop(self, status, now=None):
@@ -260,12 +309,21 @@ class Timer:
         recorded = False
         try:
             if self.session is not None:
-                elapsed = self.duration if status == "complete" else max(0, self.duration - self.remaining_seconds(now))
-                if elapsed >= MIN_RECORD_SECONDS:
-                    self.journal.update(self.session, elapsed, status)
-                    recorded = True
+                if self.counting_up:
+                    elapsed = max(0, math.floor(self.elapsed(now)))
+                    final_status = "complete" if status == "stopped" else status
+                    if elapsed >= MIN_RECORD_SECONDS:
+                        self.journal.update(self.session, elapsed, final_status, planned=elapsed)
+                        recorded = True
+                    else:
+                        self.journal.discard(self.session)
                 else:
-                    self.journal.discard(self.session)
+                    elapsed = self.duration if status == "complete" else max(0, self.duration - self.remaining_seconds(now))
+                    if elapsed >= MIN_RECORD_SECONDS:
+                        self.journal.update(self.session, elapsed, status)
+                        recorded = True
+                    else:
+                        self.journal.discard(self.session)
         finally:
             self.reset()
         return recorded
@@ -274,11 +332,19 @@ class Timer:
         self.session = None
         self.deadline = None
         self.paused_remaining = None
+        self.started_mono = None
+        self.paused_elapsed = None
         self.release = None
         self.locked = False
 
     def tick(self, now, unlock):
         if not self.running or self.paused:
+            return
+        if self.counting_up:
+            elapsed_sec = max(0, math.floor(self.elapsed(now)))
+            if self.session is not None and elapsed_sec >= self.checkpoint + 5:
+                self.checkpoint = elapsed_sec
+                self.journal.update(self.session, self.checkpoint, "active", planned=self.checkpoint)
             return
         remaining_float = self.remaining(now)
         remaining = max(0, math.ceil(remaining_float))
@@ -347,9 +413,16 @@ class Timer:
                 "cooldown": check["cooldown"],
                 "error": check["error"],
             }
-        rem_float = self.remaining(now)
-        rem_sec = max(0, math.ceil(rem_float))
-        dur = self.duration if self.running else rem_sec
+        if self.counting_up:
+            el_float = self.elapsed(now)
+            el_sec = max(0, math.floor(el_float))
+            rem_float = el_float
+            rem_sec = el_sec
+            dur = el_sec
+        else:
+            rem_float = self.remaining(now)
+            rem_sec = max(0, math.ceil(rem_float))
+            dur = self.duration if self.running else rem_sec
         return {
             "config": self.config,
             "phase": self.phase,
@@ -357,6 +430,7 @@ class Timer:
             "running": self.running,
             "paused": self.paused,
             "locked": self.locked,
+            "countingUp": self.counting_up,
             "notice": self.notice,
             "remaining": rem_sec,
             "remainingExact": round(rem_float, 3),

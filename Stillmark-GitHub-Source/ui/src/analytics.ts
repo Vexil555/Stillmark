@@ -26,6 +26,8 @@ export interface TodayStats {
   todayMin: number;
   todayCount: number;
   todayCompleted: number;
+  todayAvgMin: number;
+  todayBestMin: number;
   streak: number;
   recentTopics: string[];
 }
@@ -93,6 +95,7 @@ export function computeTodayStats(records: Session[], nowDate: Date = new Date()
   let todaySec = 0;
   let todayCount = 0;
   let todayCompleted = 0;
+  let todayBestSec = 0;
   const dayHasFocus = new Set<string>();
   const recentTopics: string[] = [];
   const seenTopics = new Set<string>();
@@ -110,6 +113,7 @@ export function computeTodayStats(records: Session[], nowDate: Date = new Date()
       if (r.started >= start) {
         todayCount += 1;
         if (r.status === 'complete') todayCompleted += 1;
+        if (r.seconds > todayBestSec) todayBestSec = r.seconds;
       }
     }
     let cursor = r.started;
@@ -130,10 +134,13 @@ export function computeTodayStats(records: Session[], nowDate: Date = new Date()
     else break;
   }
 
+  const todayMin = Math.floor(todaySec / 60);
   return {
-    todayMin: Math.floor(todaySec / 60),
+    todayMin,
     todayCount,
     todayCompleted,
+    todayAvgMin: todayCount > 0 ? Math.round(todayMin / todayCount) : 0,
+    todayBestMin: Math.round(todayBestSec / 60),
     streak,
     recentTopics,
   };

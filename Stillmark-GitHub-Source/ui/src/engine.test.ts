@@ -128,6 +128,9 @@ test('Analytics produces 42 month cells, 20 matrix weeks, distinct heat levels, 
 
   const today = computeTodayStats(records, fixedNow);
   assert.ok(today.todayMin >= 60);
+  assert.ok(today.todayCount >= 1);
+  assert.equal(today.todayAvgMin, Math.round(today.todayMin / today.todayCount));
+  assert.ok(today.todayBestMin >= today.todayAvgMin);
   assert.ok(today.streak >= 6);
 
   const monthSummary = summarizeHistory(records, 'month', 0, 0, 120, fixedNow);
@@ -142,3 +145,37 @@ test('Analytics produces 42 month cells, 20 matrix weeks, distinct heat levels, 
   const levels = new Set(matrixSummary.matrixWeeks.flatMap(w => w.days.filter(d => !d.future).map(d => d.level)));
   assert.ok(levels.size >= 4, `Expected >=4 distinct heat levels, got ${[...levels].join(',')}`);
 });
+
+test('PreviewTimerEngine deep focus count-up stopwatch mode tracks elapsed time and completes cleanly', () => {
+  const engine = new PreviewTimerEngine({ seedRecords: [], config: { mode: 'deep', deepStyle: 'countup' } });
+  assert.equal(engine.snapshot(0).countingUp, true);
+  assert.equal(engine.snapshot(0).remaining, 0);
+
+  engine.begin(false, 1000, 1700000000);
+  assert.equal(engine.running, true);
+  assert.equal(engine.snapshot(1065).remaining, 65);
+  assert.equal(engine.snapshot(1065).countingUp, true);
+
+  // Pause freezes elapsed time
+  assert.equal(engine.pause(1100), true);
+  assert.equal(engine.snapshot(1250).remaining, 100);
+
+  // Resume continues accumulating from 100s
+  assert.equal(engine.resume(1250), true);
+  assert.equal(engine.snapshot(1450).remaining, 300); // 5 minutes (>= 180s)
+
+  // Finishing count-up session manually records as complete with planned === elapsed
+  const recorded = engine.endManual('complete', '已完成正计时', 1450);
+  assert.equal(recorded, true);
+  assert.equal(engine.records.length, 1);
+  assert.equal(engine.records[0].status, 'complete');
+  assert.equal(engine.records[0].seconds, 300);
+  assert.equal(engine.records[0].planned, 300);
+
+  // Short count-up session (<180s) should be discarded
+  engine.begin(false, 2000, 1700005000);
+  const shortRecorded = engine.endManual('complete', '已完成正计时', 2120);
+  assert.equal(shortRecorded, false);
+  assert.equal(engine.records.length, 1);
+});
+

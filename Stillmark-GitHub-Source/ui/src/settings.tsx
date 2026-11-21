@@ -237,7 +237,7 @@ export function Settings({ state, set, send }: { state: State; set: SetConfig; s
           />
           <SettingRow
             title="表盘 60 道刻线"
-            description="在表盘外环绘制 60 枚分度刻线与四向方位数字，关闭后呈现极简进度光环。"
+            description="在表盘外环绘制 60 枚精密主次刻线，关闭后呈现极简进度光环。"
             control={
               <Toggle label="表盘 60 道刻线" checked={config.dialTicks} onChange={value => set('dialTicks', value)} />
             }

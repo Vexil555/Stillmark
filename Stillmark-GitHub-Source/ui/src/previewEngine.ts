@@ -14,6 +14,7 @@ const LIVE_KEYS = new Set<keyof Config>([
 const ENUMS: Partial<Record<keyof Config, readonly string[]>> = {
   theme: ['light', 'dark'],
   mode: ['deep', 'pomo'],
+  deepStyle: ['countdown', 'countup'],
   ambientStyle: ['brown', 'rain', 'hearth'],
 };
 
@@ -130,6 +131,8 @@ export class PreviewTimerEngine {
   round = 1;
   deadline: number | null = null;
   pausedRemaining: number | null = null;
+  startedMono: number | null = null;
+  pausedElapsed: number | null = null;
   duration = 0;
   locked = false;
   notice = '';
@@ -155,12 +158,21 @@ export class PreviewTimerEngine {
     return this.config.mode === 'deep' ? 'deep' : 'work';
   }
 
+  get countingUp(): boolean {
+    return this.phase === 'deep' && this.config.deepStyle === 'countup';
+  }
+
   get running(): boolean {
-    return this.deadline !== null || this.pausedRemaining !== null;
+    return (
+      this.deadline !== null ||
+      this.pausedRemaining !== null ||
+      this.startedMono !== null ||
+      this.pausedElapsed !== null
+    );
   }
 
   get paused(): boolean {
-    return this.pausedRemaining !== null;
+    return this.pausedRemaining !== null || this.pausedElapsed !== null;
   }
 
   get resting(): boolean {
@@ -213,9 +225,28 @@ export class PreviewTimerEngine {
 
   begin(locked = false, nowSec: number = performance.now() / 1000, wallNowSec: number = Math.floor(Date.now() / 1000)): boolean {
     if (this.running) return false;
-    this.duration = this.config[this.phase] * 60;
     this.notice = '';
     this.pausedRemaining = null;
+    this.pausedElapsed = null;
+    if (this.countingUp) {
+      this.duration = 0;
+      this.deadline = null;
+      this.startedMono = nowSec;
+      this.activeSession = {
+        id: this.nextSessionId++,
+        started: wallNowSec,
+        seconds: 0,
+        planned: 0,
+        mode: this.config.mode,
+        topic: this.config.topic,
+        status: 'complete',
+        locked: locked ? 1 : 0,
+      };
+      this.locked = locked;
+      return true;
+    }
+    this.startedMono = null;
+    this.duration = this.config[this.phase] * 60;
     if (!this.resting) {
       this.activeSession = {
         id: this.nextSessionId++,
@@ -237,27 +268,45 @@ export class PreviewTimerEngine {
 
   pause(nowSec: number = performance.now() / 1000): boolean {
     if (!this.running || this.paused || this.locked || this.resting) return false;
-    this.pausedRemaining = this.remaining(nowSec);
-    this.deadline = null;
+    if (this.countingUp) {
+      this.pausedElapsed = this.elapsed(nowSec);
+      this.startedMono = null;
+    } else {
+      this.pausedRemaining = this.remaining(nowSec);
+      this.deadline = null;
+    }
     this.notice = '已暂停计时';
     return true;
   }
 
   resume(nowSec: number = performance.now() / 1000): boolean {
-    if (!this.paused || this.pausedRemaining === null) return false;
-    this.deadline = nowSec + this.pausedRemaining;
-    this.pausedRemaining = null;
+    if (!this.paused) return false;
+    if (this.pausedElapsed !== null) {
+      this.startedMono = nowSec - this.pausedElapsed;
+      this.pausedElapsed = null;
+    } else if (this.pausedRemaining !== null) {
+      this.deadline = nowSec + this.pausedRemaining;
+      this.pausedRemaining = null;
+    }
     this.notice = '';
     return true;
   }
 
+  elapsed(nowSec: number = performance.now() / 1000): number {
+    if (this.pausedElapsed !== null) return this.pausedElapsed;
+    if (this.startedMono !== null) return Math.max(0, nowSec - this.startedMono);
+    return 0;
+  }
+
   remaining(nowSec: number = performance.now() / 1000): number {
+    if (this.countingUp) return this.elapsed(nowSec);
     if (this.pausedRemaining !== null) return this.pausedRemaining;
     if (this.deadline === null) return this.config[this.phase] * 60;
     return Math.max(0, this.deadline - nowSec);
   }
 
   remainingSeconds(nowSec: number = performance.now() / 1000): number {
+    if (this.countingUp) return Math.max(0, Math.floor(this.elapsed(nowSec)));
     return Math.max(0, Math.ceil(this.remaining(nowSec)));
   }
 
@@ -265,22 +314,39 @@ export class PreviewTimerEngine {
     if (!this.running) return false;
     let recorded = false;
     if (this.activeSession && status !== 'skipped') {
-      const elapsed = status === 'complete'
-        ? this.duration
-        : Math.max(0, this.duration - this.remainingSeconds(nowSec));
-      if (elapsed >= MIN_RECORD_SECONDS) {
-        const finalized: Session = {
-          ...this.activeSession,
-          seconds: elapsed,
-          status,
-        };
-        this.records = [finalized, ...this.records];
-        recorded = true;
+      if (this.countingUp) {
+        const elapsed = Math.max(0, Math.floor(this.elapsed(nowSec)));
+        const finalStatus: Session['status'] = status === 'stopped' ? 'complete' : status;
+        if (elapsed >= MIN_RECORD_SECONDS) {
+          const finalized: Session = {
+            ...this.activeSession,
+            seconds: elapsed,
+            planned: elapsed,
+            status: finalStatus,
+          };
+          this.records = [finalized, ...this.records];
+          recorded = true;
+        }
+      } else {
+        const elapsed = status === 'complete'
+          ? this.duration
+          : Math.max(0, this.duration - this.remainingSeconds(nowSec));
+        if (elapsed >= MIN_RECORD_SECONDS) {
+          const finalized: Session = {
+            ...this.activeSession,
+            seconds: elapsed,
+            status,
+          };
+          this.records = [finalized, ...this.records];
+          recorded = true;
+        }
       }
     }
     this.activeSession = null;
     this.deadline = null;
     this.pausedRemaining = null;
+    this.startedMono = null;
+    this.pausedElapsed = null;
     this.release = null;
     this.locked = false;
     return recorded;
@@ -303,6 +369,9 @@ export class PreviewTimerEngine {
     historyChanged: boolean;
   } {
     if (!this.running || this.paused) {
+      return { phaseChanged: false, historyChanged: false };
+    }
+    if (this.countingUp) {
       return { phaseChanged: false, historyChanged: false };
     }
     const rem = this.remainingSeconds(nowSec);
@@ -407,9 +476,10 @@ export class PreviewTimerEngine {
         error: check.error,
       };
     }
-    const remFloat = this.remaining(nowSec);
-    const remSec = Math.max(0, Math.ceil(remFloat));
-    const dur = this.running ? this.duration : remSec;
+    const isUp = this.countingUp;
+    const remFloat = isUp ? this.elapsed(nowSec) : this.remaining(nowSec);
+    const remSec = isUp ? Math.max(0, Math.floor(remFloat)) : Math.max(0, Math.ceil(remFloat));
+    const dur = isUp ? remSec : (this.running ? this.duration : remSec);
     const estimatedBytes = 12288 + this.records.length * 168;
     return {
       config: { ...this.config },
@@ -418,6 +488,7 @@ export class PreviewTimerEngine {
       running: this.running,
       paused: this.paused,
       locked: this.locked,
+      countingUp: isUp,
       notice: this.notice,
       remaining: remSec,
       remainingExact: Math.round(remFloat * 1000) / 1000,

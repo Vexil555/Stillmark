@@ -112,18 +112,15 @@ class InstrumentAudio {
     } else if (gesture === 'start') {
       this.voice(context, 186, 140, 0, 0.25, 0.24, 'triangle', this.chimeGain);
       this.voice(context, 373, 330, 0.062, 0.32, 0.12, 'sine', this.chimeGain);
-    } else {
+    } else if (gesture === 'rest') {
       this.voice(context, 392, 391, 0, 0.5, 0.16, 'sine', this.chimeGain);
-      this.voice(
-        context,
-        gesture === 'rest' ? 330 : 522,
-        gesture === 'rest' ? 329 : 521,
-        0.19,
-        0.7,
-        0.14,
-        'sine',
-        this.chimeGain,
-      );
+      this.voice(context, 330, 329, 0.19, 0.72, 0.14, 'sine', this.chimeGain);
+    } else {
+      // Celebratory warm ascending fifth + octave bell chord on focus completion
+      this.voice(context, 392, 391.5, 0, 0.52, 0.16, 'sine', this.chimeGain);
+      this.voice(context, 493.88, 493.2, 0.14, 0.58, 0.14, 'sine', this.chimeGain);
+      this.voice(context, 587.33, 586.5, 0.28, 0.85, 0.15, 'sine', this.chimeGain);
+      this.voice(context, 783.99, 783.0, 0.34, 0.95, 0.08, 'triangle', this.chimeGain);
     }
   }
 
