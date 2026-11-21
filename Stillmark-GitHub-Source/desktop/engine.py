@@ -256,7 +256,7 @@ class Timer:
         self.locked = locked
 
     def pause(self, now=None):
-        if not self.running or self.paused or self.locked or self.resting:
+        if not self.running or self.paused or self.resting or (self.locked and not self.counting_up):
             return False
         now = time.monotonic() if now is None else now
         if self.counting_up:
@@ -374,15 +374,24 @@ class Timer:
         else:
             self.notice = "休息结束，准备好后开始下一轮"
 
+    def release_difficulty(self):
+        base_length = self.config["releaseLength"]
+        base_cooldown = self.config["cooldownSeconds"]
+        if self.counting_up:
+            length = max(8, min(16, base_length // 4))
+            cooldown = 0 if base_cooldown == 0 else max(10, min(30, base_cooldown // 6))
+            return length, cooldown
+        return base_length, base_cooldown
+
     def request_release(self, now=None):
         now = time.monotonic() if now is None else now
-        length = self.config["releaseLength"]
+        length, cooldown = self.release_difficulty()
         self.release = {
             "code": "".join(secrets.choice(ALPHABET) for _ in range(length)),
             "length": length,
             "count": 0,
             "until": None,
-            "cooldown": self.config["cooldownSeconds"],
+            "cooldown": cooldown,
             "error": False,
         }
 

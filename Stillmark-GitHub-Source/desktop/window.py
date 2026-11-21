@@ -205,11 +205,15 @@ class Bridge(QObject):
 
     def tick(self):
         timer = self.timer
-        if not timer.running or timer.paused:
+        if not timer.running:
             return
         now = time.monotonic()
         if timer.locked and self.window.guard.pulse():
             self.end("emergency", "安全熔断已解除沉浸锁定")
+            return
+        if timer.paused:
+            if timer.release is not None:
+                self.publish(now)
             return
         before = (timer.phase, timer.running)
         try:
@@ -286,7 +290,11 @@ class Bridge(QObject):
                 if timer.release is None:
                     timer.request_release()
                 elif timer.release["until"] is not None and time.monotonic() >= timer.release["until"]:
-                    self.end("released", "本次专注已提前结束")
+                    if timer.counting_up:
+                        if self.end("complete", "本次正计时专注已完成"):
+                            self.chime.emit("finish")
+                    else:
+                        self.end("released", "本次专注已提前结束")
             else:
                 if timer.counting_up:
                     if self.end("complete", "本次正计时专注已完成"):

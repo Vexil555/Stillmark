@@ -179,3 +179,37 @@ test('PreviewTimerEngine deep focus count-up stopwatch mode tracks elapsed time 
   assert.equal(engine.records.length, 1);
 });
 
+test('PreviewTimerEngine locked count-up supports pause/resume and uses lighter release difficulty', () => {
+  const engine = new PreviewTimerEngine({
+    seedRecords: [],
+    config: { mode: 'deep', deepStyle: 'countup', lock: true, releaseLength: 64, cooldownSeconds: 180 },
+  });
+  engine.begin(true, 1000, 1700000000);
+  assert.equal(engine.locked, true);
+  assert.equal(engine.countingUp, true);
+
+  // Locked count-up CAN pause and resume (unlike countdown)
+  assert.equal(engine.pause(1090), true);
+  assert.equal(engine.paused, true);
+  assert.equal(engine.snapshot(1200).remaining, 90);
+  assert.equal(engine.resume(1200), true);
+  assert.equal(engine.paused, false);
+  assert.equal(engine.snapshot(1320).remaining, 210);
+
+  // Lighter release difficulty: 64 -> 16 chars, 180s -> 30s
+  engine.requestRelease();
+  const snap = engine.snapshot(1320);
+  assert.ok(snap.release);
+  assert.equal(snap.release.length, 16);
+  assert.equal(snap.release.code.length, 16);
+  assert.equal(snap.release.cooldown, 30);
+
+  for (const ch of snap.release.code) {
+    engine.releaseKey(ch, 1330);
+  }
+  assert.equal(engine.snapshot(1340).release?.wait, 20);
+  assert.equal(engine.canCompleteRelease(1359), false);
+  assert.equal(engine.canCompleteRelease(1360), true);
+});
+
+

@@ -114,7 +114,11 @@ export function createPreviewBridge(): StillmarkBridgeObject {
   window.addEventListener('keyup', onKeyUp);
 
   const intervalId = window.setInterval(() => {
-    if (!engine.running || engine.paused) return;
+    if (!engine.running) return;
+    if (engine.paused) {
+      if (engine.hasRelease()) publish();
+      return;
+    }
     const now = nowSec();
     const result = engine.tick(now);
     if (result.phaseChanged && result.chime) {
@@ -167,7 +171,12 @@ export function createPreviewBridge(): StillmarkBridgeObject {
           if (!engine.hasRelease()) {
             engine.requestRelease();
           } else if (engine.canCompleteRelease(now)) {
-            engine.endManual('released', '本次专注已提前结束', now);
+            if (engine.countingUp) {
+              const recorded = engine.endManual('complete', '本次正计时专注已完成', now);
+              if (recorded) chime.emit('finish');
+            } else {
+              engine.endManual('released', '本次专注已提前结束', now);
+            }
             publishHistory();
           }
         } else {

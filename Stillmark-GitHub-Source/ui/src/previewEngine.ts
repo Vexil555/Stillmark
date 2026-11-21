@@ -267,7 +267,7 @@ export class PreviewTimerEngine {
   }
 
   pause(nowSec: number = performance.now() / 1000): boolean {
-    if (!this.running || this.paused || this.locked || this.resting) return false;
+    if (!this.running || this.paused || this.resting || (this.locked && !this.countingUp)) return false;
     if (this.countingUp) {
       this.pausedElapsed = this.elapsed(nowSec);
       this.startedMono = null;
@@ -419,8 +419,20 @@ export class PreviewTimerEngine {
     return true;
   }
 
+  getReleaseDifficulty(): { length: number; cooldown: number } {
+    const baseLength = this.config.releaseLength;
+    const baseCooldown = this.config.cooldownSeconds;
+    if (this.countingUp) {
+      return {
+        length: Math.max(8, Math.min(16, Math.floor(baseLength / 4))),
+        cooldown: baseCooldown === 0 ? 0 : Math.max(10, Math.min(30, Math.floor(baseCooldown / 6))),
+      };
+    }
+    return { length: baseLength, cooldown: baseCooldown };
+  }
+
   requestRelease(): void {
-    const length = this.config.releaseLength;
+    const { length, cooldown } = this.getReleaseDifficulty();
     let code = '';
     for (let i = 0; i < length; i++) {
       code += ALPHABET[Math.floor(this.randomSource() * ALPHABET.length)];
@@ -430,7 +442,7 @@ export class PreviewTimerEngine {
       length,
       count: 0,
       until: null,
-      cooldown: this.config.cooldownSeconds,
+      cooldown,
       error: false,
     };
   }
