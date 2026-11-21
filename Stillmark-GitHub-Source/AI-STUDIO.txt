@@ -1,0 +1,43 @@
+刻度 STILLMARK · 给 Gemini 的项目说明
+
+当前基线
+
+这是已存在的 Windows 10 x64 离线桌面程序。继续修改当前仓库。目标产物是 PySide6 / Qt WebEngine 桌面应用，界面用 React + TypeScript + Vite，数据存储用 Python 标准库 SQLite，界面与原生端通过 Qt WebChannel 交换状态。运行时从 stillmark://app/index.html 读取随包分发的本地资源。
+
+当前源码比初版 README 和设计说明更新。遇到文档与实现有出入时，先核对实际代码。以用户本轮要求为准，未涉及的功能沿用源码中的当前行为。
+
+从这里开始读
+
+1. main.py 选择桌面进程或 --guard 进程入口。
+2. desktop/window.py 的 Bridge.initialize、Bridge.publish、Bridge.dispatch 和 Window 提供通信协议、窗口、覆盖层、历史导出及 Qt WebEngine 宿主。
+3. desktop/engine.py 的 Journal、Timer、DEFAULTS、RANGES 管理 SQLite、偏好、原生计时状态、暂停、阶段切换和提前释放协议。
+4. desktop/guard.py 管理 Windows 热键过滤和恢复。Windows 集成功能在 Win10 验收。
+5. ui/src/main.tsx 的 useDesktop 连接 QWebChannel。原生仍是状态来源。ui/src/model.ts 定义共享数据形状与界面默认值。设置和状态有变化时核对这两端的字段、默认值和允许范围。
+6. ui/src/timer.tsx 管理计时台、今日目标、专注确认、沉浸界面和提前结束弹窗。history.tsx 管理统计与明细。settings.tsx 管理设置。audio.ts 合成音效。controls.tsx 与 styles.css 提供控件和主题。
+7. ui/package.json、ui/package-lock.json、ui/vite.config.ts、ui/tsconfig.json 和 ui/index.html 管理前端构建。Vite 使用相对资源路径，原生程序从 ui/dist 加载。
+8. Stillmark.ps1、Stillmark.spec、requirements.txt、Setup-and-Run.cmd 和 Build-Windows.cmd 对应 Windows 启动和打包。预览入口的改动应保留这些脚本的路径和产物约定。
+
+新版行为速查
+
+- 深度专注、番茄钟、普通专注暂停续计、可配置的自动休息和自动下一轮。
+- 自动开启的下一轮使用 begin(False)，不自动进入 Windows 沉浸锁定。
+- 实际专注满 180 秒才进入普通历史查询。默认每日目标是 120 分钟。
+- 锁定提前退出的验证码可设 16–64 个字符，冷静等待可设 0–300 秒，默认 64 个字符和 180 秒。
+- 声景有低频暖噪、细雨书房、壁炉微澜。主音量和提示音音量可分别配置。
+- 深浅主题、表盘刻度与走针选项、热力图与时段图、CSV 导出、本地数据维护。
+
+当前与浏览器的接口
+
+useDesktop 在 window.qt 和 window.QWebChannel 缺失时不会连接。普通浏览器里可以看到初始界面，开始计时和需要原生通信的交互缺少状态来源。要在 Build 模式交互预览，给预览环境接一个模拟桥，并在其上迭代 UI。模拟数据使用虚构记录，不能调用用户真实数据库。桌面构建继续加载原生桥。
+
+接口以源码为准：initialize 回传 state、records、maximized，dispatch 接受 command 和字符串 raw，changed 和 recorded 推送 JSON，chime 和 maximized 推送提示音及窗口状态。配置写入以 set 命令携带 JSON 数组 [key, value]。
+
+可直接粘贴到 AI Studio 的首条提示
+
+请先读仓库里的 AI-STUDIO.txt（若我上传的是 Stillmark-AI-Studio-Context.txt，则以该附件内的源文件为准）。继续修改已有的 Stillmark Windows 10 桌面项目。先用文件路径告诉我你读到的 Windows 入口、计时状态来源、Qt WebChannel 协议、React 入口及构建目录。然后处理下方任务，保留现有 PySide6、SQLite、Win32、QWebChannel、离线能力和 Windows 打包入口。
+
+如果本轮要在 AI Studio 中交互预览，请让预览从 ui/ 启动 Vite。如果平台要求仓库根入口，新增轻量预览启动入口，保持 ui/dist 的原生打包路径。为普通浏览器提供显式开发预览桥，复用同一 State、Session 和命令结构，让计时台、主题、统计和设置能交互。模拟桥只在开发预览下启用，Qt 存在时始终走真桥。没有 Qt 的生产构建继续显示连接等待。预览里的全屏、系统键、熔断、SQLite 文件和导出场景以模拟状态展示，桌面效果留到 Win10 验收。
+
+我的本轮任务是：【在此填写一项具体功能和验收条件】。
+
+如果当前是在 Build 模式，请直接编辑仓库中的相应文件，并在最后列出修改的路径、前后端契约变化、已实际运行的命令和需在 Windows 验证的部分。如果是在 Chat 模式，请按真实相对路径返回 unified diff，如果难以生成可应用的补丁，再返回每个修改文件的完整内容。变更配置、协议、计时和统计时请同时检查其调用方和持久化行为。

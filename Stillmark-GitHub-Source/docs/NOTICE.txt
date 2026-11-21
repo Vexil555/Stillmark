@@ -1,0 +1,23 @@
+STILLMARK 1.0.0 — third-party notices
+
+Qt 6.8.3 and Qt for Python (PySide6 / Shiboken6), The Qt Company Ltd.
+LGPL-3.0-only, with components distributed under their respective licenses.
+Runtime libraries are dynamically loaded from the portable release's _internal
+directory. You may replace these files with ABI-compatible rebuilt libraries,
+and reverse engineer the application for debugging those modifications.
+Corresponding source:
+https://download.qt.io/archive/qt/6.8/6.8.3/single/qt-everywhere-src-6.8.3.tar.xz
+https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.8.3-src/
+Qt WebEngine includes Chromium and related code. Chromium license information
+is included in the Qt WebEngine corresponding source at
+qtwebengine/src/3rdparty/chromium and its third_party directories.
+
+CPython 3.12, Python Software Foundation. PSF License.
+PyInstaller, David Cortesi and contributors. GPL-2.0-or-later with a
+special exception for bootloaders used to create application bundles.
+https://github.com/pyinstaller/pyinstaller/tree/v6.22.0
+
+React and React DOM, Meta Platforms, Inc. and affiliates. MIT.
+Lucide, Lucide Contributors and Feather contributors. ISC/MIT.
+Barlow Condensed, The Barlow Project Authors. SIL Open Font License 1.1.
+IBM Plex Mono, IBM Corp. SIL Open Font License 1.1.
